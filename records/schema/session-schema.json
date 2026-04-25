@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/example/agent-run-recorder/blob/main/records/schema/session-schema.json",
+  "title": "AgentSession",
+  "description": "A complete record of a single AI agent session, including all events, tool calls, artifacts, and summary statistics.",
+  "type": "object",
+  "required": ["session_id", "schema_version", "agent_name", "started_at", "status", "events"],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Unique session identifier. Recommended format: <slug>-<date>, e.g. 'refactor-utils-2024-01-15'.",
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    },
+    "schema_version": {
+      "type": "string",
+      "description": "Semver version of the session record schema.",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "examples": ["1.0.0"]
+    },
+    "agent_name": {
+      "type": "string",
+      "description": "Name or model identifier of the agent that ran this session.",
+      "minLength": 1
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when the session started."
+    },
+    "finished_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "UTC timestamp when the session finished. Null if the session is still in progress."
+    },
+    "duration_ms": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Total session wall-clock duration in milliseconds."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["in_progress", "completed", "failed", "interrupted"],
+      "description": "Terminal status of the session."
+    },
+    "metadata": {
+      "$ref": "#/$defs/SessionMetadata"
+    },
+    "summary": {
+      "oneOf": [
+        { "$ref": "#/$defs/SessionSummary" },
+        { "type": "null" }
+      ],
+      "description": "Aggregated statistics. Populated when the session is finalised."
+    },
+    "events": {
+      "type": "array",
+      "description": "Ordered list of events captured during the session.",
+      "items": { "$ref": "#/$defs/SessionEvent" }
+    }
+  },
+  "$defs": {
+    "SessionMetadata": {
+      "type": "object",
+      "description": "Arbitrary metadata attached to a session at creation time.",
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": ["string", "null"],
+          "description": "Model identifier, e.g. 'claude-3-5-sonnet-20241022'."
+        },
+        "task": {
+          "type": ["string", "null"],
+          "description": "Human-readable description of the task the agent was given."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Free-form tags for filtering and grouping sessions."
+        },
+        "extra": {
+          "type": "object",
+          "description": "Additional key-value pairs. No schema enforcement.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "SessionSummary": {
+      "type": "object",
+      "description": "Aggregated statistics for a completed session.",
+      "required": ["total_events", "tool_calls", "tool_failures", "artifacts_produced", "token_input_total", "token_output_total"],
+      "additionalProperties": false,
+      "properties": {
+        "total_events": { "type": "integer", "minimum": 0 },
+        "tool_calls": { "type": "integer", "minimum": 0 },
+        "tool_failures": { "type": "integer", "minimum": 0 },
+        "artifacts_produced": { "type": "integer", "minimum": 0 },
+        "token_input_total": { "type": "integer", "minimum": 0 },
+        "token_output_total": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SessionEvent": {
+      "type": "object",
+      "description": "A single event in the session event stream.",
+      "required": ["seq", "type", "ts", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Monotonically increasing sequence number within the session."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["tool_call", "tool_result", "message", "artifact", "error"],
+          "description": "Event type discriminant."
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time",
+          "description": "UTC timestamp when the event was recorded."
+        },
+        "payload": {
+          "description": "Event payload. Shape is determined by the 'type' field.",
+          "oneOf": [
+            { "$ref": "#/$defs/ToolCallPayload" },
+            { "$ref": "#/$defs/ToolResultPayload" },
+            { "$ref": "#/$defs/MessagePayload" },
+            { "$ref": "#/$defs/ArtifactPayload" },
+            { "$ref": "#/$defs/ErrorPayload" }
+          ]
+        }
+      }
+    },
+    "ToolCallPayload": {
+      "type": "object",
+      "description": "Payload for a tool_call event.",
+      "required": ["call_id", "tool", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string",
+          "description": "Unique identifier for this call within the session. Matched by the corresponding tool_result."
+        },
+        "tool": {
+          "type": "string",
+          "description": "Tool name as registered with the agent."
+        },
+        "args": {
+          "type": "object",
+          "description": "Arguments passed to the tool.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "ToolResultPayload": {
+      "type": "object",
+      "description": "Payload for a tool_result event.",
+      "required": ["call_id", "tool", "duration_ms", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string",
+          "description": "Matches the call_id in the corresponding tool_call event."
+        },
+        "tool": {
+          "type": "string",
+          "description": "Tool name, duplicated here for readability."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock time for the tool invocation in milliseconds."
+        },
+        "exit_code": {
+          "type": ["integer", "null"],
+          "description": "Exit code for command-like tools. Null if not applicable."
+        },
+        "result": {
+          "description": "The tool's return value. May be a string, object, array, or null."
+        },
+        "error": {
+          "type": ["string", "null"],
+          "description": "Error message if the tool raised an exception."
+        }
+      }
+    },
+    "TokenCounts": {
+      "type": "object",
+      "description": "Token usage for a single model turn.",
+      "required": ["input", "output"],
+      "additionalProperties": false,
+      "properties": {
+        "input": { "type": "integer", "minimum": 0 },
+        "output": { "type": "integer", "minimum": 0 },
+        "cache_read": { "type": ["integer", "null"], "minimum": 0 },
+        "cache_write": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "MessagePayload": {
+      "type": "object",
+      "description": "Payload for a message event.",
+      "required": ["role", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["user", "assistant", "system"],
+          "description": "Message sender role."
+        },
+        "content": {
+          "type": "string",
+          "description": "Message text content."
+        },
+        "token_counts": {
+          "oneOf": [
+            { "$ref": "#/$defs/TokenCounts" },
+            { "type": "null" }
+          ],
+          "description": "Token usage. Populated for assistant messages when available."
+        }
+      }
+    },
+    "ArtifactPayload": {
+      "type": "object",
+      "description": "Payload for an artifact event.",
+      "required": ["artifact_id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "description": "Unique identifier for this artifact within the session."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["file", "snippet", "data", "image"],
+          "description": "Artifact kind."
+        },
+        "path": {
+          "type": ["string", "null"],
+          "description": "File path, if the artifact is a file on disk."
+        },
+        "size_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "File size in bytes."
+        },
+        "produced_by_call": {
+          "type": ["string", "null"],
+          "description": "call_id of the tool_call that produced this artifact."
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "Human-readable description of what this artifact contains or represents."
+        },
+        "content": {
+          "type": ["string", "null"],
+          "description": "Inline content for small artifacts. Null for large files."
+        }
+      }
+    },
+    "ErrorPayload": {
+      "type": "object",
+      "description": "Payload for an error event.",
+      "required": ["message", "recoverable"],
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "Human-readable error description."
+        },
+        "exception_type": {
+          "type": ["string", "null"],
+          "description": "Python exception class name, e.g. 'FileNotFoundError'."
+        },
+        "traceback": {
+          "type": ["string", "null"],
+          "description": "Full traceback string, if available."
+        },
+        "recoverable": {
+          "type": "boolean",
+          "description": "True if the session continued after this error."
+        }
+      }
+    }
+  }
+}
