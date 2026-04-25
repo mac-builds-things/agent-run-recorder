@@ -1,0 +1,31 @@
+---
+description: Session recording schema standards
+globs: src/**/*.py,records/**/*.json
+alwaysApply: false
+---
+
+# Session Schema Standards
+
+## Events are append-only
+Never modify or delete a recorded event. The event log is an immutable audit trail.
+
+## Required fields on every event
+All SessionEvent objects must have: id, type, timestamp, data.
+```python
+# ✅ GOOD
+event = SessionEvent(
+    id=str(uuid.uuid4()),
+    type=EventType.TOOL_CALL,
+    timestamp=datetime.utcnow(),
+    data={"tool": "read_file", "params": {"path": "src/main.py"}}
+)
+
+# ❌ BAD — missing id and timestamp
+event = {"type": "tool_call", "data": {"tool": "read_file"}}
+```
+
+## Session ID format
+Use `session-YYYYMMDD-NNN` format. Don't use random UUIDs for session IDs — they're not human-readable in file listings.
+
+## Artifacts by reference
+Store artifact paths, not artifact content, in the session JSON. Large content in events causes performance issues.
