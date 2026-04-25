@@ -1,122 +1,73 @@
 # agent-run-recorder
 
-> Capture, store, and replay AI agent sessions as structured timelines — for debugging, auditing, and sharing agent work.
+*Record, store, and render structured timelines of AI agent coding sessions.*
 
----
-
-## Why This Exists
-
-AI agent sessions are ephemeral and opaque. You run an agent, it does things, and when the process ends you're left with a final output (if you're lucky) and no clear record of what happened in between. Tool calls get lost. Intermediate reasoning evaporates. Artifacts produced mid-session disappear from view.
-
-This project makes agent sessions **persistent, searchable, and human-readable**.
-
-Every tool call, model response, artifact write, and error is captured as a structured event in a session record. Those records can be rendered as readable timelines, diffed against other sessions, stored for auditing, or replayed for debugging.
-
----
-
-## What Makes It Interesting
-
-- **Structured event capture** — each event has a type, timestamp, duration, token counts, and a typed payload; no unstructured log scraping
-- **Timeline rendering** — sessions render to readable, color-coded terminal output with collapsible tool calls and artifact summaries
-- **Artifact tracking** — files written, code generated, and data produced during a session are linked to the events that produced them
-- **Session summaries** — auto-generated summaries of what an agent accomplished, what it tried, and where it got stuck
-- **Schema-first design** — all session records validate against a published JSON Schema; tooling can be built on top with confidence
-- **File-based persistence** — sessions are stored as plain JSON; no database required; works with git, grep, and standard tooling
-
----
-
-## Quickstart
-
-```bash
-pip install -r requirements.txt
-```
-
-### Record a session
-
-```python
-from src.recorder import SessionRecorder, EventType
-
-recorder = SessionRecorder(session_id="my-first-session", agent_name="my-agent")
-recorder.start()
-
-recorder.record_event(
-    event_type=EventType.tool_call,
-    payload={"tool": "read_file", "args": {"path": "src/main.py"}},
-)
-recorder.record_event(
-    event_type=EventType.tool_result,
-    payload={"tool": "read_file", "result": "def main(): ...", "duration_ms": 12},
-)
-recorder.record_event(
-    event_type=EventType.message,
-    payload={"role": "assistant", "content": "I can see the main function. Let me refactor it."},
-)
-
-session = recorder.finish()
-session.save("records/")
-```
-
-### Render a timeline
-
-```python
-from src.storage import SessionStorage
-from src.timeline import TimelineRenderer
-
-session = SessionStorage("records/").load("my-first-session")
-TimelineRenderer().render(session)
-```
-
----
-
-## Example Workflow
+## Example output
 
 ```
-$ python examples/record_session.py
-[recorder] Session started: refactor-utils-2024-01-15
-[recorder] 23 events captured
-[recorder] 4 artifacts tracked
-[recorder] Session saved: records/sessions/refactor-utils-2024-01-15.json
+$ python render_timeline.py records/examples/example-session.json
 
-$ python examples/render_timeline.py records/sessions/refactor-utils-2024-01-15.json
+session  refactor-authenticate-2024-03-15
+agent    claude-3-5-sonnet-20241022
+task     Refactor the authenticate() function in auth.py …
+status   completed  (2m 46s)
+
+14:22:01.003  ▎ user        Refactor the authenticate() function in auth.py …
+14:22:03.441  ▎ assistant   I'll start by reading the current auth.py …
+14:22:03.501  ▶ tool_call   read_file          src/auth.py
+14:22:03.618  ◀ tool_result read_file          117 ms  exit:—
+14:22:07.219  ▎ assistant   Now I can see the existing implementation …
+14:22:07.311  ▶ tool_call   run_tests          pytest tests/test_auth.py -v
+14:22:14.802  ◀ tool_result run_tests          7491 ms  exit:0
+14:22:14.901  ▶ tool_call   write_file         src/auth.py
+14:22:15.044  ◀ tool_result write_file         143 ms  exit:—
+14:22:15.045  ★ artifact    src/auth.py        810 bytes
+
+tokens  in:3842  out:1204  tool calls:4  failures:0
 ```
 
-See [EXAMPLE.md](EXAMPLE.md) for a detailed walkthrough of a full recorded session — the event stream, timeline rendering, artifacts, and summary output.
+## Usage
 
----
+```sh
+# Record a new session (wraps your agent invocation)
+python record_session.py --agent <cmd> --task "description" --out records/
 
-## Project Structure
-
-```
-agent-run-recorder/
-├── src/
-│   ├── recorder.py      # Core recording: AgentSession, SessionRecorder, EventType
-│   ├── timeline.py      # Renders a session as a readable terminal timeline
-│   ├── schema.py        # Pydantic models for the session data format
-│   └── storage.py       # File-based session persistence
-├── records/
-│   ├── schema/
-│   │   └── session-schema.json    # JSON Schema for session records
-│   └── examples/
-│       └── example-session.json   # A realistic example session record
-├── examples/
-│   ├── record_session.py          # How to wrap an agent run with the recorder
-│   └── render_timeline.py         # How to render a stored session
-└── tests/
-    └── test_recorder.py
+# Render a recorded session as a terminal timeline
+python render_timeline.py records/examples/example-session.json
 ```
 
----
+## Session format
 
-## What This Demonstrates
+Events are stored as a JSON array. Each event has a `seq`, `type`, `ts`, and `payload`:
 
-- **Session tracing** — capturing structured events from an agent process, similar to distributed tracing but for agentic workloads
-- **Event sourcing patterns** — the session record is an append-only event log; state can be reconstructed by replaying events
-- **Agent observability** — making the interior of an agent run inspectable after the fact, not just during
-- **Schema-first tooling** — anchoring a data format in JSON Schema so that independent renderers, analyzers, and storage backends can interoperate
+```json
+{
+  "session_id": "refactor-authenticate-2024-03-15",
+  "schema_version": "1.0.0",
+  "agent_name": "claude-3-5-sonnet-20241022",
+  "started_at": "2024-03-15T14:22:01.003Z",
+  "status": "completed",
+  "events": [
+    { "seq": 1, "type": "message",     "ts": "2024-03-15T14:22:01.003Z",
+      "payload": { "role": "user", "content": "Refactor the authenticate() …" } },
+    { "seq": 3, "type": "tool_call",   "ts": "2024-03-15T14:22:03.501Z",
+      "payload": { "call_id": "call_01", "tool": "read_file", "args": { "path": "src/auth.py" } } },
+    { "seq": 4, "type": "tool_result", "ts": "2024-03-15T14:22:03.618Z",
+      "payload": { "call_id": "call_01", "tool": "read_file", "duration_ms": 117, "exit_code": null } },
+    { "seq": 10, "type": "artifact",   "ts": "2024-03-15T14:22:15.045Z",
+      "payload": { "kind": "file", "path": "src/auth.py", "size_bytes": 810 } }
+  ]
+}
+```
 
----
+## How it works
 
-## Status
+- Sessions are plain JSON files — one file per run, schema-validated, human-readable.
+- The recorder wraps any agent process and captures stdin/stdout events with microsecond timestamps.
+- The renderer replays events in order, computing durations from adjacent timestamps and formatting tool I/O inline.
 
-Early-stage / concept implementation. The schema design and data model are the main artifacts; the Python stubs are well-typed and ready to have bodies filled in. Intended as a foundation to build on, not a production library.
+## Schema
 
+Schema definition lives at `records/schema/session-schema.json`.
+
+**Status:** early-stage, schema at v1.0.0, API unstable.
